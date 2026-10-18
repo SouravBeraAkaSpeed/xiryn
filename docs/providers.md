@@ -22,8 +22,21 @@ The model picker lists what your key can actually use, fetched live from the pro
 | Mistral | `MISTRAL_API_KEY` | pick from the live list | [console.mistral.ai](https://console.mistral.ai/api-keys) |
 | DeepSeek | `DEEPSEEK_API_KEY` | pick from the live list | [platform.deepseek.com](https://platform.deepseek.com/api_keys) |
 | OpenRouter | `OPENROUTER_API_KEY` | `openrouter/<vendor>/<model>` | [openrouter.ai](https://openrouter.ai/keys) |
+| OpenCode | `OPENCODE_API_KEY` | `opencode/kimi-k3` | [opencode.ai/console](https://opencode.ai/console) |
 
 Each hosted provider also accepts a `<PROVIDER>_BASE_URL` (e.g. `OPENAI_BASE_URL`) for proxies or regional endpoints.
+
+### OpenCode
+
+OpenCode ([Go](https://opencode.ai/docs/go/) subscription or [Console](https://opencode.ai/docs/console/) pay-as-you-go) serves every model through one of four API dialects — OpenAI chat completions, OpenAI Responses, Anthropic Messages or Gemini — and its gateway asks clients for a session id per conversation. Xiryn handles both: it routes each model to the right dialect and sends the `x-opencode-session` header (the thread's id) and its own user agent on every request.
+
+A Go key works with the default endpoint. A Console key needs:
+
+```bash
+OPENCODE_BASE_URL=https://opencode.ai/inference/openai/v1
+```
+
+Any endpoint your key's page gives you (they end in `/v1`) also works. Then use `opencode/<model-id>`, e.g. `opencode/kimi-k3`, `opencode/mimo-v2.5` or `opencode/claude-haiku-5-5`.
 
 ## Local models
 

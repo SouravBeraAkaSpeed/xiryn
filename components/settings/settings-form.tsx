@@ -279,6 +279,11 @@ function ProviderRow({ provider }: { provider: SettingsData["providers"][number]
                   : provider.defaultBaseUrl || "https://your-endpoint/v1"
               }
             />
+            {provider.note && (
+              <span className="text-[11.5px] leading-relaxed text-muted-foreground">
+                {provider.note}
+              </span>
+            )}
           </label>
           <div className="flex flex-wrap items-center gap-2">
             <Button
