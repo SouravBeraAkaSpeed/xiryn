@@ -396,7 +396,7 @@ Every setting can come from `.env` **or** from **Settings** in the app. Values s
 
 | Variable | Purpose |
 | --- | --- |
-| `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY`, `XAI_API_KEY`, `GROQ_API_KEY`, `MISTRAL_API_KEY`, `DEEPSEEK_API_KEY`, `OPENROUTER_API_KEY` | Hosted model providers |
+| `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY`, `XAI_API_KEY`, `GROQ_API_KEY`, `MISTRAL_API_KEY`, `DEEPSEEK_API_KEY`, `OPENROUTER_API_KEY`, `OPENCODE_API_KEY` | Hosted model providers |
 | `OLLAMA_BASE_URL`, `LMSTUDIO_BASE_URL`, `CUSTOM_BASE_URL` | Local runtimes and any OpenAI-compatible API |
 | `XIRYN_DEFAULT_MODEL`, `XIRYN_MAX_STEPS` | Default `provider/model`, max tool calls per turn |
 | `XIRYN_MONTHLY_BUDGET` | Dollars a month for paid models; once spent they wait for the 1st (local models keep working) |

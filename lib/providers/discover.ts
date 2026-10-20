@@ -1,11 +1,13 @@
 import { getProviderMeta, type ProviderId } from "@/lib/providers/catalog"
+import { opencodeUrls } from "@/lib/providers/opencode"
 import { getProviderCredentials } from "@/lib/providers/registry"
 
 export type DiscoveredModel = { id: string; label?: string }
 
 // Model ids that are clearly not chat models: embeddings, speech, images…
+// (Jev is OpenCode's SystemOne model: structured decisions, not conversation)
 const NON_CHAT =
-  /(embed|whisper|tts|transcri|dall-e|image|audio|realtime|moderation|davinci|babbage|search|rerank|live|guard|sora|veo|imagen|lyria|speech|translate)/i
+  /(embed|whisper|tts|transcri|dall-e|image|audio|realtime|moderation|davinci|babbage|search|rerank|live|guard|sora|veo|imagen|lyria|speech|translate|jev)/i
 
 async function getJson(url: string, init: RequestInit) {
   const response = await fetch(url, {
@@ -58,7 +60,11 @@ export async function discoverModels(id: ProviderId): Promise<DiscoveredModel[]>
       .filter((m) => !NON_CHAT.test(m.id))
   }
 
-  const json = await getJson(`${base}/models`, {
+  // OpenCode lists models at {root}/v1/models, one level above its
+  // OpenAI-compatible chat endpoint (…/openai/v1 or a compact alias)
+  const modelsUrl =
+    id === "opencode" ? `${opencodeUrls(base).models}/models` : `${base}/models`
+  const json = await getJson(modelsUrl, {
     headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
   })
   const list = (json.data ?? json.models ?? []) as { id: string; name?: string }[]

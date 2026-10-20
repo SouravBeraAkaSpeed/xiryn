@@ -9,6 +9,7 @@ export type ProviderId =
   | "mistral"
   | "deepseek"
   | "openrouter"
+  | "opencode"
   | "ollama"
   | "lmstudio"
   | "custom"
@@ -28,6 +29,8 @@ export type ProviderMeta = {
   // Runs on this machine; nothing leaves it
   local?: boolean
   keysUrl?: string
+  // Shown under the endpoint field in Settings, for providers worth a sentence
+  note?: string
   // A few known-good ids, shown before the live list is fetched
   suggested: string[]
 }
@@ -112,6 +115,25 @@ export const providers: ProviderMeta[] = [
     requiresKey: true,
     keysUrl: "https://openrouter.ai/keys",
     suggested: [],
+  },
+  {
+    id: "opencode",
+    name: "OpenCode",
+    keyEnv: "OPENCODE_API_KEY",
+    baseUrlEnv: "OPENCODE_BASE_URL",
+    // OpenCode Go (subscription). Console (pay-as-you-go) keys use the same
+    // provider with OPENCODE_BASE_URL=https://opencode.ai/inference/openai/v1
+    defaultBaseUrl: "https://opencode.ai/inference/go/openai/v1",
+    requiresKey: true,
+    keysUrl: "https://opencode.ai/console",
+    note: "OpenCode Go by default; a Console key works with the endpoint changed to https://opencode.ai/inference/openai/v1. Your key's own endpoint (it ends in /v1) also works.",
+    suggested: [
+      "mimo-v2.5",
+      "glm-5.3-flash",
+      "kimi-k3",
+      "deepseek-v4.1-flash",
+      "claude-haiku-5-5",
+    ],
   },
   {
     id: "ollama",

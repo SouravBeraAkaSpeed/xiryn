@@ -412,7 +412,7 @@ export async function startTurn({
   )
   const firstModel = (() => {
     try {
-      return createModel(firstSpec)
+      return createModel(firstSpec, { sessionId: threadId })
     } catch (error) {
       throw new TurnError(error instanceof Error ? error.message : String(error))
     }
@@ -528,7 +528,7 @@ export async function startTurn({
             )
           }
           // Validate the target's model now, so a broken config fails the call
-          createModel(specFor(target))
+          createModel(specFor(target), { sessionId: threadId })
           current = target
           held.push(target.id)
           brief = handoverBrief
@@ -612,7 +612,9 @@ export async function startTurn({
         return {
           messages: compacted,
           // After a delegation the next step runs as the new agent, on its model
-          ...(delegated && { model: createModel(specFor(current)) }),
+          ...(delegated && {
+            model: createModel(specFor(current), { sessionId: threadId }),
+          }),
           instructions:
             buildInstructions(current, capabilities, squadContext(current)) +
             (lastStep ? LAST_STEP : ""),

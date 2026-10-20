@@ -16,6 +16,7 @@ import {
   providers,
   type ProviderId,
 } from "@/lib/providers/catalog"
+import { opencodeFamily, opencodeHeaders, opencodeUrls } from "@/lib/providers/opencode"
 
 export class ModelConfigError extends Error {
   name = "ModelConfigError"
@@ -58,7 +59,13 @@ export function resolveModelSpec(agentModel?: string | null) {
   return first ? formatModelSpec(first.id, first.suggested[0]) : null
 }
 
-export function createModel(spec: string): LanguageModel {
+// `sessionId` identifies the conversation to providers that route or cache
+// per conversation (currently OpenCode); it must be stable across a thread's
+// turns and differ between threads.
+export function createModel(
+  spec: string,
+  options?: { sessionId?: string }
+): LanguageModel {
   const parsed = parseModelSpec(spec)
   if (!parsed) {
     throw new ModelConfigError(
@@ -98,6 +105,29 @@ export function createModel(spec: string): LanguageModel {
       return createMistral({ apiKey, baseURL })(model)
     case "deepseek":
       return createDeepSeek({ apiKey, baseURL })(model)
+    case "opencode": {
+      // Each OpenCode model is served by one API dialect, and every request
+      // must carry the session header the gateway routes conversations by
+      const urls = opencodeUrls(baseUrl || meta.defaultBaseUrl)
+      const headers = opencodeHeaders(options?.sessionId)
+      const family = opencodeFamily(model, urls.chat)
+      if (family === "responses") {
+        return createOpenAI({ apiKey, baseURL: urls.responses, headers }).responses(model)
+      }
+      if (family === "anthropic") {
+        return createAnthropic({ apiKey, baseURL: urls.anthropic, headers })(model)
+      }
+      if (family === "google") {
+        return createGoogle({ apiKey, baseURL: urls.google, headers })(model)
+      }
+      return createOpenAICompatible({
+        name: provider,
+        baseURL: urls.chat,
+        apiKey: apiKey || undefined,
+        headers,
+        includeUsage: true,
+      }).chatModel(model)
+    }
     case "openrouter":
     case "ollama":
     case "lmstudio":
