@@ -18,6 +18,7 @@ import {
   workstationStatus,
 } from "@/actions/workstation"
 import { Confirm } from "@/components/confirm"
+import { MachineSize } from "@/components/workbench/machine-size"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { toast } from "@/components/ui/toast"
@@ -87,6 +88,15 @@ export function Machine({
     // eslint-disable-next-line react-hooks/set-state-in-effect
     refresh()
   }, [refresh, refreshKey])
+
+  // The machine also starts and stops elsewhere (the screen, a turn, idle
+  // shutdown): keep the status current while it's on screen
+  React.useEffect(() => {
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") void refresh()
+    }, 10_000)
+    return () => clearInterval(timer)
+  }, [refresh])
 
   const run = async (label: string, action: () => Promise<WorkstationStatus>) => {
     setBusy(label)
@@ -179,6 +189,11 @@ export function Machine({
                 <span className="text-warn">update on next start</span>
               </Row>
             )}
+            {status.resized && (
+              <Row label="size">
+                <span className="text-warn">new size on next start</span>
+              </Row>
+            )}
             <Row label="internet">
               {internet === null ? (
                 <button
@@ -258,6 +273,7 @@ export function Machine({
             Stop
           </Button>
         )}
+        <MachineSize agentId={agentId} onSaved={() => void refresh()} />
         {provisioned && (
           <Confirm
             trigger={

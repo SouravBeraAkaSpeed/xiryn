@@ -610,4 +610,6 @@ console.log(
     : dim("  remote access off — optional, see docs/telegram.md")
 )
 
-console.log(`\n  next: ${bold("npm run dev")}  →  http://127.0.0.1:6796\n`)
+console.log(
+  `\n  next: ${bold("npm run dev")}  →  the first start opens Xiryn in your browser;\n        ${bold("npm run open")} opens it again any time\n`
+)

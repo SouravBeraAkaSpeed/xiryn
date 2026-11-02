@@ -146,6 +146,19 @@ export function isDesktopAction(name: string) {
   return (DESKTOP_ACTIONS as readonly string[]).includes(name)
 }
 
+// Tools that only work for a model that can see the screen. A model that
+// can't works its machine through the shell and files, and hands the screen
+// to the person when a task needs it.
+export const SIGHT_TOOLS: readonly string[] = [
+  "screen_capture",
+  "screen_share",
+  ...DESKTOP_ACTIONS,
+  "vault_list",
+  "vault_fill",
+  "request_payment_approval",
+  "request_secret",
+]
+
 async function thenLook<T extends object>(agentId: string, done: T, settleMs: number) {
   await new Promise((resolve) => setTimeout(resolve, settleMs))
   try {
@@ -399,6 +412,12 @@ export function createVaultTools(env: ToolEnv) {
         if (!item)
           throw new Error("There's no vault item with that id. Check vault_list.")
         const where = await page()
+        // Vault values go into web pages only, never a terminal or another app
+        if (!where) {
+          throw new Error(
+            "The browser isn't the focused window. Click the field on the web page first: vault values are only typed into a page."
+          )
+        }
         if (item.kind === "login" && !hostMatches(where?.host ?? null, item.site)) {
           throw new Error(
             `"${item.label}" is a login for ${item.site}, but the browser is on ${where?.host ?? "no website"}. Logins only fill on their own site.`
@@ -546,6 +565,14 @@ export function createMemoryTools(env: ToolEnv) {
 
 /* ───────────────────────────── web ────────────────────────────── */
 
+// Text from the web is data, never instructions. The model reads it inside
+// a marker it can tell apart from the person's words (the instructions say
+// what the marker means), and a page can't close the marker early.
+export function untrusted(source: string, text: string) {
+  const defused = text.replace(/<\s*\/\s*untrusted\s*>/gi, "</untrusted_>")
+  return `<untrusted source="${source.replace(/["<>\n]/g, "")}">\n${defused}\n</untrusted>`
+}
+
 export function createWebTools() {
   return {
     web_search: tool({
@@ -559,6 +586,19 @@ export function createWebTools() {
         query,
         results: await webSearch(query, limit),
       }),
+      toModelOutput: ({ output }) => ({
+        type: "text" as const,
+        value: output.results.length
+          ? untrusted(
+              "web search",
+              output.results
+                .map(
+                  (result) => `- ${result.title}\n  ${result.url}\n  ${result.snippet}`
+                )
+                .join("\n")
+            )
+          : `No results for "${output.query}".`,
+      }),
     }),
 
     web_fetch: tool({
@@ -566,6 +606,15 @@ export function createWebTools() {
         "Read a web page as clean markdown. Use it on URLs from search results or ones the person gives you.",
       inputSchema: z.object({ url: z.url() }),
       execute: async ({ url }) => webFetch(url),
+      toModelOutput: ({ output }) => ({
+        type: "text" as const,
+        value: `${output.status ? `HTTP ${output.status}. ` : ""}${untrusted(
+          output.url,
+          [output.title && `# ${output.title}`, output.markdown]
+            .filter(Boolean)
+            .join("\n\n")
+        )}`,
+      }),
     }),
   }
 }

@@ -32,17 +32,19 @@ import {
   createVaultTools,
   createWorkstationTools,
   isDesktopAction,
+  SIGHT_TOOLS,
   type XirynMessage,
   type ToolEnv,
 } from "@/lib/agent/tools"
 import { getMaxSteps } from "@/lib/config"
 import { emit, previewText } from "@/lib/events"
+import { isImageRefusal, learnedBlind, modelSight } from "@/lib/providers/capabilities"
 import { parseModelSpec } from "@/lib/providers/catalog"
 import { callCost, findPrice, toMicros } from "@/lib/providers/pricing"
 import { createModel, resolveModelSpec } from "@/lib/providers/registry"
 import { budgetBlock, getCustomPrices } from "@/lib/spend"
 import { isWebConfigured } from "@/lib/web"
-import { isWorkstationConfigured } from "@/lib/workstation"
+import { closeTakeoverLink, isWorkstationConfigured } from "@/lib/workstation"
 
 /* ───────────────────────────── runs ───────────────────────────────
  * A run is one agent turn executing inside this process. Its output is
@@ -59,6 +61,9 @@ type Run = {
   done: boolean
   controller: AbortController
   startedAt: number
+  // Settles once the run has saved everything it's going to save
+  ended: Promise<void>
+  end: () => void
 }
 
 const globalForRuns = globalThis as unknown as { __xirynRuns?: Map<string, Run> }
@@ -97,6 +102,20 @@ export function stopRun(threadId: string) {
   return true
 }
 
+// Stops a run and waits until it has written its last row, so nothing lands
+// in a thread that's about to be deleted
+export async function stopRunAndWait(threadId: string, timeoutMs = 20_000) {
+  const run = getActiveRun(threadId)
+  if (!run) return
+  run.controller.abort()
+  let timer: NodeJS.Timeout | undefined
+  await Promise.race([
+    run.ended,
+    new Promise((resolve) => (timer = setTimeout(resolve, timeoutMs))),
+  ])
+  clearTimeout(timer)
+}
+
 function publish(run: Run, chunk: UIMessageChunk) {
   run.chunks.push(chunk)
   for (const listener of run.listeners) {
@@ -110,6 +129,7 @@ function publish(run: Run, chunk: UIMessageChunk) {
 
 function finish(run: Run) {
   run.done = true
+  run.end()
   for (const listener of run.listeners) {
     try {
       listener.close()
@@ -382,9 +402,14 @@ function shrink(output: ToolOutput, keepImage: boolean, keepFull: boolean): Tool
   const raw =
     typeof output.value === "string" ? output.value : JSON.stringify(output.value ?? "")
   if (raw.length <= STUB_CHARS) return output
+  const kept = raw.slice(0, STUB_CHARS)
+  // Web text stays inside its untrusted marker when cut short
+  const unclosed =
+    (kept.match(/<untrusted /g)?.length ?? 0) >
+    (kept.match(/<\/untrusted>/g)?.length ?? 0)
   return {
     type: "text",
-    value: `${raw.slice(0, STUB_CHARS)}… [${raw.length - STUB_CHARS} more characters of an earlier result trimmed]`,
+    value: `${kept}… [${raw.length - STUB_CHARS} more characters of an earlier result trimmed]${unclosed ? "\n</untrusted>" : ""}`,
   }
 }
 
@@ -511,6 +536,25 @@ function answerOnly(spec: string) {
 
 /* ───────────────────────────── turns ───────────────────────────── */
 
+function loadMembers(thread: ReturnType<typeof loadThread>): Agent[] {
+  return thread.squad
+    ? thread.squad.members.map((member) => member.agent)
+    : thread.agent
+      ? [thread.agent]
+      : []
+}
+
+// A model that can't see images can't use a screen: its agent works the
+// machine through the shell, and isn't offered the tools that need one
+async function sightOf(members: Agent[]) {
+  const sight = new Map<string, boolean>()
+  for (const member of members) {
+    const spec = resolveModelSpec(member.model)
+    sight.set(member.id, !spec || (await modelSight(spec)) !== false)
+  }
+  return sight
+}
+
 export async function startTurn({
   threadId,
   message,
@@ -524,16 +568,15 @@ export async function startTurn({
   channel?: "web" | "telegram"
   routine?: { id: string; name: string }
 }) {
+  // Asked first: from the check below until the run is registered nothing
+  // may wait, or two messages at once could both start a turn
+  const sight = await sightOf(loadMembers(loadThread(threadId)))
   if (getActiveRun(threadId)) {
     throw new TurnError("An agent is already working in this thread.", 409)
   }
 
   const thread = loadThread(threadId)
-  const members: Agent[] = thread.squad
-    ? thread.squad.members.map((member) => member.agent)
-    : thread.agent
-      ? [thread.agent]
-      : []
+  const members = loadMembers(thread)
   const first = members.find((member) => member.id === agentId) ?? members[0]
   if (!first) throw new TurnError("This thread has no agents left in it.", 410)
 
@@ -579,6 +622,8 @@ export async function startTurn({
     },
   }
   saveMessage(threadId, userMessage)
+  // The person took the desktop back: the phone link has done its job
+  if (userMessage.metadata?.handback) void closeTakeoverLink(first.id)
   const prompt = textOf(userMessage)
   db.update(threads)
     .set({
@@ -658,6 +703,11 @@ export async function startTurn({
         }
       : undefined
 
+  const capabilitiesFor = (agent: Agent): Capabilities => ({
+    ...capabilities,
+    sight: sight.get(agent.id) ?? true,
+  })
+
   const tools: ToolSet = {
     ...(capabilities.workstation
       ? { ...createWorkstationTools(env), ...createVaultTools(env) }
@@ -684,7 +734,11 @@ export async function startTurn({
         })
       : {}),
   }
+  const blindTools = Object.keys(tools).filter((name) => !SIGHT_TOOLS.includes(name))
+  const toolsFor = (agent: Agent) =>
+    sight.get(agent.id) === false ? blindTools : Object.keys(tools)
 
+  let end = () => {}
   const run: Run = {
     id: nanoid(),
     threadId,
@@ -693,6 +747,8 @@ export async function startTurn({
     done: false,
     controller: new AbortController(),
     startedAt: Date.now(),
+    ended: new Promise<void>((resolve) => (end = resolve)),
+    end: () => end(),
   }
   runs.set(threadId, run)
   emit({
@@ -736,9 +792,10 @@ export async function startTurn({
     )
     const result = streamText({
       model: firstModel,
-      instructions: buildInstructions(first, capabilities, squadContext(first)),
+      instructions: buildInstructions(first, capabilitiesFor(first), squadContext(first)),
       messages: forProvider(firstSpec, initialMessages),
       tools,
+      activeTools: toolsFor(first),
       // The turn also ends when the agent needs the person: its screen,
       // a payment decision or a detail only they have
       stopWhen: [
@@ -756,14 +813,17 @@ export async function startTurn({
         if (delegated) activeSpec = specFor(current)
         // Long tool loops resend everything each step; keep it lean
         const compacted = forProvider(activeSpec, compactContext(stepMessages))
-        if (!delegated && !lastStep) return { messages: compacted }
+        // Whoever holds the turn gets the tools their model can use
+        const activeTools = toolsFor(current)
+        if (!delegated && !lastStep) return { messages: compacted, activeTools }
         appliedAgentId = current.id
         return {
           messages: compacted,
+          activeTools,
           // After a delegation the next step runs as the new agent, on its model
           ...(delegated && { model: createModel(specFor(current)) }),
           instructions:
-            buildInstructions(current, capabilities, squadContext(current)) +
+            buildInstructions(current, capabilitiesFor(current), squadContext(current)) +
             (lastStep ? LAST_STEP : ""),
           ...(lastStep && answerOnly(activeSpec)),
         }
@@ -775,7 +835,7 @@ export async function startTurn({
         usage.toolCalls += step.toolCalls.length
       },
       onError: ({ error }) => {
-        failure = describeError(error)
+        failure = describeError(error, activeSpec)
         console.error(`[xiryn] turn failed in thread ${threadId}:`, error)
       },
     })
@@ -785,7 +845,8 @@ export async function startTurn({
       return streamText({
         model: createModel(activeSpec),
         instructions:
-          buildInstructions(current, capabilities, squadContext(current)) + NO_ANSWER,
+          buildInstructions(current, capabilitiesFor(current), squadContext(current)) +
+          NO_ANSWER,
         messages: forProvider(
           activeSpec,
           compactContext([
@@ -803,7 +864,7 @@ export async function startTurn({
           usage.steps++
         },
         onError: ({ error }) => {
-          failure = describeError(error)
+          failure = describeError(error, activeSpec)
           console.error(`[xiryn] turn failed in thread ${threadId}:`, error)
         },
       })
@@ -826,7 +887,7 @@ export async function startTurn({
         }
         return undefined
       },
-      onError: (error) => describeError(error),
+      onError: (error) => describeError(error, activeSpec),
       onEnd: ({ responseMessage, isAborted }) => {
         const durationMs = Date.now() - run.startedAt
         const reply = {
@@ -948,7 +1009,17 @@ export async function startTurn({
   return run
 }
 
-function describeError(error: unknown): string {
+function describeError(error: unknown, spec?: string): string {
+  const message = rawError(error)
+  // Said in terms of what to do: the provider only says what it refused
+  if (spec && isImageRefusal(message)) {
+    learnedBlind(spec)
+    return `${spec} can't see images, and every desktop action shows the agent a screenshot. From the next message on, this agent works through its shell and files only. For desktop tasks, pick a model with vision for it (Edit agent → Model) or as the default (Settings → Model).`
+  }
+  return message
+}
+
+function rawError(error: unknown): string {
   if (error instanceof Error) {
     const cause = (error as { responseBody?: string }).responseBody
     if (cause) {

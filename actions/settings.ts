@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache"
 
 import { isWritableSetting, setSetting } from "@/lib/config"
+import { modelSight } from "@/lib/providers/capabilities"
 import { getProviderMeta, parseModelSpec, type ProviderId } from "@/lib/providers/catalog"
 import { discoverModels } from "@/lib/providers/discover"
 import { pingFirecrawl } from "@/lib/web"
@@ -70,10 +71,17 @@ export async function fetchProviderModels(provider: ProviderId) {
   }
 }
 
+// Whether a model can see images: true, false, or null when unknown
+export async function checkModelSight(spec: string) {
+  if (!parseModelSpec(spec)) return null
+  return modelSight(spec)
+}
+
 export async function testIntegration(name: "firecrawl") {
   if (name !== "firecrawl") return { ok: false as const, error: "Unknown integration" }
   try {
-    const { remainingCredits, planCredits } = await pingFirecrawl()
+    const { selfHosted, remainingCredits, planCredits } = await pingFirecrawl()
+    if (selfHosted) return { ok: true as const, detail: "Connected · your own server" }
     const credits =
       remainingCredits === null
         ? ""

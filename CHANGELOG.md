@@ -2,6 +2,41 @@
 
 All notable changes to Xiryn are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/).
 
+## [0.7.0] — 2026-11-02
+
+Agent computers your size, agents that only answer to you, and fixes for local models that can't see images.
+
+### Added
+
+- **Size each agent's computer.** Under **Machine → Size** in an agent's workbench, give it as many processors and as much memory as your computer has, and a screen from 1280×800 to 2560×1440. The machine moves to its new size the next time it starts, keeping its files. When Docker itself is allowed less, Xiryn says so; on Windows it offers to raise Docker's limit for you (it changes your WSL settings, keeps a backup and restarts Docker).
+- **`npm run open`** opens Xiryn in your browser.
+
+### Changed
+
+- **Xiryn only answers your own browser.** It always refused other computers, but an agent's machine could reach it through Docker and pretend to be you.
+  - Now Xiryn answers only a browser that was opened with its link. The link carries a key from your data folder, which no agent's machine can read, and your browser remembers it.
+  - The first start opens the link for you, and every start prints it. `npm run open` opens it any time.
+  - Another browser sees a page explaining this.
+- **Models that can't see images get a shell, not a broken desktop.**
+  - The model picker now says when a local model (Ollama, LM Studio) can't see images, before you create an agent on it.
+  - An agent on such a model works through its shell and files instead of failing at its first screenshot.
+  - When a provider refuses images mid-task, the error says what to do, and the agent works without the desktop from then on. ([#22](https://github.com/SouravBeraAkaSpeed/xiryn/issues/22))
+- Agents no longer assume their screen is 1280×800; each screenshot says its real size.
+
+### Fixed
+
+- **Self-hosted Firecrawl.** "Test connection" reported a working self-hosted Firecrawl as not connected, because it asked for credits only the hosted service has. It now reads a small page instead and says "your own server". A server of your own also works without a key. ([#19](https://github.com/SouravBeraAkaSpeed/xiryn/issues/19))
+- **Deleting a busy agent.** Its tasks, including any its squads were running, now stop and finish saving before anything is deleted. The records go in one step, then its machine. If Docker isn't running, you're told the machine is removed once it is. ([#7](https://github.com/SouravBeraAkaSpeed/xiryn/issues/7))
+
+### Security
+
+- **Web pages can't pass as your instructions.** Search results and fetched pages now reach the model marked as untrusted, in a way a page can't undo, and agents are told that only you give them orders. ([#18](https://github.com/SouravBeraAkaSpeed/xiryn/issues/18))
+- **Agents' machines are kept apart.** They now share a network on which they can't reach each other, only the internet, and can't craft raw network packets. Existing machines are rebuilt at their next start, keeping their files.
+- **Vault values go into web pages only.** A login, card or personal detail is typed only when the agent's browser is the focused window, never into a terminal or another app.
+- **Phone take-over links close sooner.** A link now closes as soon as you hand the desktop back, instead of after 30 minutes.
+
+**Upgrade:** `git pull && npm install`, then restart Xiryn (`npm run background -- restart` in background mode). The database migrates itself. The first start after upgrading opens Xiryn in your browser with its new link; after that, use `npm run open` or the link Xiryn prints.
+
 ## [0.6.0] — 2026-10-24
 
 Routine history, local models on Ollama's own API, and fixes for agents that went quiet or couldn't see their screen.
@@ -164,6 +199,7 @@ The first public release.
 - **Security:** loopback-only server, Host/Origin guard, masked secrets.
 - Constellation glyphs for agents and squads, dark and light themes, command palette (⌘K), responsive layout.
 
+[0.7.0]: https://github.com/SouravBeraAkaSpeed/xiryn/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/SouravBeraAkaSpeed/xiryn/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/SouravBeraAkaSpeed/xiryn/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/SouravBeraAkaSpeed/xiryn/compare/v0.4.1...v0.5.0

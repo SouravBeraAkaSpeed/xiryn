@@ -6,6 +6,16 @@ export async function register() {
   const { connect } = await import("./db")
   connect()
 
+  // The link that opens Xiryn in the person's browser (lib/browser-key.ts).
+  // The first start makes its key and opens the link, so nobody has to find it.
+  const { browserKey, unlockUrl } = await import("./lib/browser-key")
+  const { created } = browserKey()
+  console.log(`[xiryn] open Xiryn with this link: ${unlockUrl()}`)
+  if (created) {
+    const { openInBrowser } = await import("./lib/open-browser")
+    openInBrowser(unlockUrl())
+  }
+
   // One-time vault entries (codes, a card used once) don't outlive a day
   const { sweepVault } = await import("./lib/vault")
   sweepVault()

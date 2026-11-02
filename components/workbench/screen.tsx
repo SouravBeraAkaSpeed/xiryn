@@ -25,6 +25,15 @@ import { cn } from "@/lib/utils"
 
 type State = "idle" | "connecting" | "connected" | "disconnected" | "error"
 
+// The desktop is reached under the loopback name this page isn't using.
+// Browsers keep cookies per name, not per port, so Xiryn's own cookie
+// (lib/browser-key.ts) never reaches the agent's machine.
+function otherLoopbackName(url: string) {
+  const desktop = new URL(url)
+  desktop.hostname = window.location.hostname === "localhost" ? "127.0.0.1" : "localhost"
+  return desktop.toString()
+}
+
 export function Screen({
   agentId,
   agentName,
@@ -80,7 +89,7 @@ export function Screen({
       if (attempt !== attemptRef.current) return
       const target = screen()
       target.replaceChildren()
-      const rfb = new Client(target, url, {
+      const rfb = new Client(target, otherLoopbackName(url), {
         credentials: { username: "", password, target: "" },
       })
       rfb.scaleViewport = true

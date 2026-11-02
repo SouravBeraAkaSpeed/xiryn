@@ -33,6 +33,17 @@ const builtFile = path.join(dataDir, "background-build.json")
 const URL = "http://127.0.0.1:6796"
 const next = path.join(root, "node_modules", "next", "dist", "bin", "next")
 
+// The link that opens Xiryn in a browser (lib/browser-key.ts), once the
+// server has made its key
+function link() {
+  try {
+    const key = readFileSync(path.join(dataDir, "browser.key"), "utf8").trim()
+    return `${URL}/unlock?key=${key}`
+  } catch {
+    return URL
+  }
+}
+
 const command = process.argv[2] ?? "start"
 const dryRun = process.argv.includes("--dry-run")
 
@@ -116,7 +127,7 @@ function build() {
 async function start() {
   const pid = readPid()
   if ((pid && alive(pid)) || (await answering())) {
-    console.log(ok(`Xiryn is already running at ${bold(URL)}`))
+    console.log(ok(`Xiryn is already running. Open it: ${bold(link())}`))
     return
   }
   if (needsBuild()) build()
@@ -140,7 +151,7 @@ async function start() {
   const deadline = Date.now() + 90_000
   while (Date.now() < deadline) {
     if (await answering()) {
-      console.log(ok(`Xiryn is running in the background at ${bold(URL)}`))
+      console.log(ok(`Xiryn is running in the background. Open it: ${bold(link())}`))
       console.log(
         dim(
           `  Close this terminal any time. Stop it with: npm run background -- stop\n  Log: ${logFile}`

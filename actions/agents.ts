@@ -1,6 +1,6 @@
 "use server"
 
-import { eq, notExists } from "drizzle-orm"
+import { eq, inArray, notExists, or } from "drizzle-orm"
 import { revalidatePath } from "next/cache"
 
 import { db } from "@/db"
@@ -12,7 +12,7 @@ import {
   threads,
   type AgentInput,
 } from "@/db/schema"
-import { stopRun } from "@/lib/agent/runtime"
+import { stopRunAndWait } from "@/lib/agent/runtime"
 import { engineSnapshot } from "@/lib/docker"
 import { deleteWorkstation } from "@/lib/workstation"
 
@@ -54,27 +54,55 @@ export async function updateAgent(agentId: string, values: AgentInput) {
   return agent
 }
 
-// Deletes the agent, its threads, its memory — and its workstation
+// Deletes the agent, its threads, its memory — and its workstation. Errors
+// come back as values: a production build hides thrown messages.
 export async function deleteAgent(agentId: string) {
   const agent = db.select().from(agents).where(eq(agents.id, agentId)).get()
-  if (!agent) throw new Error("Agent not found")
+  if (!agent) return { ok: false as const, error: "That agent no longer exists." }
 
-  const owned = db
+  // Its own threads, and its squads' threads (a squad can hand it the turn).
+  // Each run is stopped and has saved its last row before anything goes.
+  const busy = db
     .select({ id: threads.id })
     .from(threads)
-    .where(eq(threads.agentId, agentId))
-    .all()
-  for (const thread of owned) stopRun(thread.id)
-
-  // The machine and its files go too. With Docker stopped, the cleanup that
-  // runs in the background removes them once it's back.
-  if (engineSnapshot()?.state === "ready") await deleteWorkstation(agentId)
-  db.delete(agents).where(eq(agents.id, agentId)).run()
-  // A squad left with nobody in it has nothing to show
-  db.delete(squads)
     .where(
-      notExists(db.select().from(squadMembers).where(eq(squadMembers.squadId, squads.id)))
+      or(
+        eq(threads.agentId, agentId),
+        inArray(
+          threads.squadId,
+          db
+            .select({ id: squadMembers.squadId })
+            .from(squadMembers)
+            .where(eq(squadMembers.agentId, agentId))
+        )
+      )
     )
-    .run()
+    .all()
+  await Promise.all(busy.map((thread) => stopRunAndWait(thread.id)))
+
+  db.transaction((tx) => {
+    tx.delete(agents).where(eq(agents.id, agentId)).run()
+    // A squad left with nobody in it has nothing to show
+    tx.delete(squads)
+      .where(
+        notExists(
+          tx.select().from(squadMembers).where(eq(squadMembers.squadId, squads.id))
+        )
+      )
+      .run()
+  })
   revalidatePath("/", "layout")
+
+  // Then the machine and its files. With Docker stopped, or if removing it
+  // fails, the cleanup that runs in the background removes them later.
+  let machine: "removed" | "later" = "later"
+  if (engineSnapshot()?.state === "ready") {
+    try {
+      await deleteWorkstation(agentId)
+      machine = "removed"
+    } catch (error) {
+      console.error(`[xiryn] couldn't remove ${agent.name}'s machine yet:`, error)
+    }
+  }
+  return { ok: true as const, machine }
 }

@@ -10,7 +10,7 @@ import { Controller, useForm, useWatch } from "react-hook-form"
 import { createAgent, deleteAgent, updateAgent } from "@/actions/agents"
 import { Confirm } from "@/components/confirm"
 import { Glyph } from "@/components/glyph"
-import { ModelPicker } from "@/components/model-picker"
+import { ModelPicker, ModelSightNote } from "@/components/model-picker"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -203,6 +203,7 @@ function AgentForm({ agent, template }: { agent?: NavAgent; template?: AgentTemp
                 <FieldDescription>
                   Workstation tasks need a model that supports tools and images.
                 </FieldDescription>
+                <ModelSightNote spec={field.value || status.defaultModel} />
                 {fieldState.invalid && <FieldError errors={[fieldState.error]} />}
               </Field>
             )}
@@ -248,12 +249,20 @@ function AgentForm({ agent, template }: { agent?: NavAgent; template?: AgentTemp
               </Button>
             }
             title={`Delete ${agent.name}?`}
-            description="Its threads, its memory and its workstation (including every file on it) are deleted. This can't be undone."
+            description="Anything it's doing is stopped first. Its threads, its memory and its workstation (including every file on it) are deleted. This can't be undone."
             action="Delete agent"
             onConfirm={async () => {
               try {
-                await deleteAgent(agent.id)
-                toast.add({ type: "success", title: `${agent.name} deleted` })
+                const result = await deleteAgent(agent.id)
+                if (!result.ok) throw new Error(result.error)
+                toast.add({
+                  type: "success",
+                  title: `${agent.name} deleted`,
+                  description:
+                    result.machine === "later"
+                      ? "Its workstation is removed once Docker is running."
+                      : undefined,
+                })
                 closeDialog()
                 router.push("/")
               } catch (error) {

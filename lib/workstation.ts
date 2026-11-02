@@ -13,6 +13,7 @@ import {
   ensureEngine,
   type RunOptions,
 } from "@/lib/docker"
+import { jpegSize, machineKey, machineSpec } from "@/lib/machines"
 import { ensureImage, imageTag } from "@/lib/workstation-image"
 
 // Each agent owns a workstation: a Docker container on this computer with a
@@ -74,28 +75,48 @@ type Inspection = {
   finishedAt: string
   cpus: number
   memoryBytes: number
+  // The size the machine was built with (lib/machines.ts)
+  machine: string
+  // How the machine is cut off from the others (ISOLATION), "" before that
+  isolation: string
 }
+
+// One line per container, in the order parseInspection reads it
+export const INSPECT_FORMAT = [
+  "{{.State.Status}}",
+  '{{index .Config.Labels "xiryn.image"}}',
+  "{{.State.StartedAt}}",
+  "{{.State.FinishedAt}}",
+  "{{.HostConfig.NanoCpus}}",
+  "{{.HostConfig.Memory}}",
+  // Without it every machine looks resized and is rebuilt
+  '{{index .Config.Labels "xiryn.machine"}}',
+  '{{index .Config.Labels "xiryn.isolation"}}',
+].join("\t")
 
 async function inspect(name: string): Promise<Inspection | null> {
   const { exitCode, stdout, stderr } = await dockerRaw(
-    [
-      "inspect",
-      "--type",
-      "container",
-      "--format",
-      '{{.State.Status}}\t{{index .Config.Labels "xiryn.image"}}\t{{.State.StartedAt}}\t{{.State.FinishedAt}}\t{{.HostConfig.NanoCpus}}\t{{.HostConfig.Memory}}',
-      name,
-    ],
+    ["inspect", "--type", "container", "--format", INSPECT_FORMAT, name],
     { timeoutMs: 20_000 }
   )
   if (exitCode !== 0) {
     if (/no such (container|object)/i.test(stderr)) return null
     throw new Error(dockerReason(stderr) || "Couldn't look up the workstation.")
   }
-  const [status, image, startedAt, finishedAt, nanoCpus, memory] = stdout
-    .toString()
-    .trim()
-    .split("\t")
+  return parseInspection(stdout.toString())
+}
+
+export function parseInspection(line: string): Inspection {
+  const [
+    status,
+    image,
+    startedAt,
+    finishedAt,
+    nanoCpus,
+    memory,
+    machine = "",
+    isolation = "",
+  ] = line.replace(/[\r\n]+$/, "").split("\t")
   return {
     status,
     image,
@@ -103,6 +124,35 @@ async function inspect(name: string): Promise<Inspection | null> {
     finishedAt,
     cpus: Number(nanoCpus) / 1e9 || 0,
     memoryBytes: Number(memory) || 0,
+    machine,
+    isolation,
+  }
+}
+
+// Agents' machines can't reach each other: they share a network on which
+// containers can't talk to one another (only out to the internet), and they
+// can't craft raw packets. Machines from before this are rebuilt at their
+// next start; their home folders carry over.
+const NETWORK = "xiryn-workstations"
+export const ISOLATION = "net1"
+
+async function ensureNetwork() {
+  const found = await dockerRaw(["network", "inspect", "--format", "{{.Id}}", NETWORK])
+  if (found.exitCode === 0) return
+  const made = await dockerRaw([
+    "network",
+    "create",
+    "--driver",
+    "bridge",
+    "--opt",
+    "com.docker.network.bridge.enable_icc=false",
+    "--label",
+    "xiryn.workstation-network=1",
+    NETWORK,
+  ])
+  // Two machines starting at once both try; the second finds it made
+  if (made.exitCode !== 0 && !/already exists/i.test(made.stderr)) {
+    throw new Error(dockerReason(made.stderr) || "Couldn't set up the agents' network.")
   }
 }
 
@@ -113,9 +163,12 @@ async function create(agentId: string, tag: string) {
     .where(eq(agents.id, agentId))
     .get()
   if (!agent) throw new Error("Agent not found")
+  await ensureNetwork()
 
-  const cpus = numberSetting("workstation.cpus") || 2
-  const memory = numberSetting("workstation.memory") || 4
+  // Each agent's own size, or the workspace defaults
+  const spec = machineSpec(agentId)
+  const cpus = spec.cpus
+  const memory = spec.memoryGb
   const idle = Math.round(numberSetting("workstation.autoStop") ?? 15)
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
   // Asked for by the desktop viewer; the port is reachable from this computer only
@@ -140,12 +193,20 @@ async function create(agentId: string, tag: string) {
       ...labels.flatMap((l) => ["--label", l]),
       "--label",
       `xiryn.image=${tag}`,
+      "--label",
+      `xiryn.machine=${machineKey(spec)}`,
+      "--label",
+      `xiryn.isolation=${ISOLATION}`,
+      "--network",
+      NETWORK,
+      "--cap-drop",
+      "NET_RAW",
       "--env",
       `XIRYN_VNC_PASSWORD=${password}`,
       "--env",
       `XIRYN_IDLE_MINUTES=${idle}`,
       "--env",
-      `XIRYN_SCREEN=${SCREEN.width}x${SCREEN.height}`,
+      `XIRYN_SCREEN=${spec.width}x${spec.height}`,
       "--env",
       `TZ=${timeZone}`,
       "--volume",
@@ -196,7 +257,15 @@ async function prepare(agentId: string): Promise<Session> {
   // A stopped machine on an outdated image is recreated; its home folder,
   // which lives in a volume, carries over
   const current = imageTag()
-  if (found && found.status !== "running" && found.image !== current) {
+  // The same when its size was changed, and for machines made
+  // before they were cut off from each other
+  const resized = found && found.machine !== machineKey(machineSpec(agentId))
+  const unisolated = found && found.isolation !== ISOLATION
+  if (
+    found &&
+    found.status !== "running" &&
+    (found.image !== current || resized || unisolated)
+  ) {
     await docker(["rm", "--force", name])
     found = null
   }
@@ -375,7 +444,9 @@ export async function captureScreen(agentId: string) {
   const result = await execOrThrow(agentId, ["xiryn-shot"], { timeoutMs: 30_000 })
   const image = result.stdout.toString("ascii").trim()
   if (!image) throw new Error("The screenshot came back empty.")
-  return { image, mediaType: "image/jpeg", width: SCREEN.width, height: SCREEN.height }
+  // The screenshot's own size: agents' screens can differ
+  const size = jpegSize(image) ?? SCREEN
+  return { image, mediaType: "image/jpeg", width: size.width, height: size.height }
 }
 
 const xdotool = (agentId: string, args: string[]) =>
@@ -485,7 +556,9 @@ export async function maskFocusedField(agentId: string) {
 }
 
 // The page in front of the person: the browser tab whose title is in the
-// focused window, read from Chromium's debugging port inside the container
+// focused window, read from Chromium's debugging port inside the container.
+// Null when the focused window isn't the browser: typing a vault secret must
+// never land in a terminal or another app.
 export async function currentPage(agentId: string) {
   const [targets, focused] = await Promise.all([
     execIn(agentId, ["curl", "-s", "-m", "4", "http://127.0.0.1:9222/json/list"], {
@@ -503,11 +576,10 @@ export async function currentPage(agentId: string) {
   } catch {
     return null
   }
-  const title = focused.stdout
-    .toString()
-    .trim()
-    .replace(/ - Chromium$/, "")
-  const page = pages.find((candidate) => candidate.title === title) ?? pages[0]
+  const windowName = focused.stdout.toString().trim()
+  if (!/ - Chromium$/.test(windowName)) return null
+  const title = windowName.replace(/ - Chromium$/, "")
+  const page = pages.find((candidate) => candidate.title === title)
   if (!page) return null
   return {
     url: page.url,
@@ -631,6 +703,21 @@ export async function getTakeoverLink(
   return { url: `${new URL("/xiryn.html", base)}#${fragment}`, minutes }
 }
 
+// Ends the phone link early, when the person hands the desktop back: nobody
+// needs it any more. Never starts a stopped machine.
+export async function closeTakeoverLink(agentId: string) {
+  await dockerRaw(
+    [
+      "exec",
+      containerName(agentId),
+      "sh",
+      "-c",
+      "pkill -x cloudflared; rm -f /tmp/xiryn/tunnel/url /tmp/xiryn/tunnel/expires",
+    ],
+    { timeoutMs: 15_000 }
+  ).catch(() => {})
+}
+
 /* ──────────────────────────── status ──────────────────────────── */
 
 export type WorkstationStatus =
@@ -640,6 +727,8 @@ export type WorkstationStatus =
       state: "running" | "stopped" | "starting"
       container: string
       outdated: boolean
+      // Its size was changed; applies at the next restart
+      resized: boolean
       cpus: number
       memoryGb: number
       diskBytes: number | null
@@ -677,7 +766,10 @@ export async function getWorkstationStatus(agentId: string): Promise<Workstation
     cpus: found.cpus,
     memoryGb: found.memoryBytes / 1024 ** 3,
     diskBytes,
-    screen: `${SCREEN.width}×${SCREEN.height}`,
+    screen:
+      found.machine.split("-").pop()?.replace("x", "×") ||
+      `${SCREEN.width}×${SCREEN.height}`,
+    resized: found.machine !== machineKey(machineSpec(agentId)),
     since: running ? found.startedAt : found.finishedAt,
   }
 }

@@ -1,10 +1,22 @@
 import { getSetting } from "@/lib/config"
 
 // Web access goes through Firecrawl: search returns ranked results, fetch
-// returns any page as clean markdown. Both are off without a key.
+// returns any page as clean markdown. Both are off until Firecrawl is set
+// up: a key for the hosted service, or the address of your own server.
+
+const CLOUD = "https://api.firecrawl.dev"
+
+function firecrawlBase() {
+  return (getSetting("firecrawl.apiUrl") ?? CLOUD).replace(/\/+$/, "")
+}
+
+// A server of your own may run without keys
+function isSelfHosted() {
+  return firecrawlBase() !== CLOUD
+}
 
 export function isWebConfigured() {
-  return !!getSetting("firecrawl.apiKey")
+  return !!getSetting("firecrawl.apiKey") || isSelfHosted()
 }
 
 async function firecrawl<T>(
@@ -12,19 +24,15 @@ async function firecrawl<T>(
   init: { method?: string; body?: unknown } = {}
 ) {
   const apiKey = getSetting("firecrawl.apiKey")
-  if (!apiKey) {
+  if (!apiKey && !isSelfHosted()) {
     throw new Error(
       "Web access is off: add FIRECRAWL_API_KEY to .env or paste a key in Settings → Integrations."
     )
   }
-  const base = (getSetting("firecrawl.apiUrl") ?? "https://api.firecrawl.dev").replace(
-    /\/+$/,
-    ""
-  )
-  const response = await fetch(`${base}${path}`, {
+  const response = await fetch(`${firecrawlBase()}${path}`, {
     method: init.method ?? "POST",
     headers: {
-      Authorization: `Bearer ${apiKey}`,
+      ...(apiKey && { Authorization: `Bearer ${apiKey}` }),
       "Content-Type": "application/json",
     },
     body: init.body ? JSON.stringify(init.body) : undefined,
@@ -75,13 +83,22 @@ export async function webFetch(url: string, maxChars = 12_000) {
   }
 }
 
-// Free call used by Settings to prove the key works
+// Used by Settings to prove Firecrawl answers. The hosted service has a free
+// call that reports credits; a server of your own has no credits to report
+// (and no such call), so it reads a small page instead.
 export async function pingFirecrawl() {
+  if (isSelfHosted()) {
+    await firecrawl("/v2/scrape", {
+      body: { url: "https://example.com", formats: ["markdown"] },
+    })
+    return { selfHosted: true, remainingCredits: null, planCredits: null }
+  }
   const data = await firecrawl<{ remainingCredits?: number; planCredits?: number }>(
     "/v2/team/credit-usage",
     { method: "GET" }
   )
   return {
+    selfHosted: false,
     remainingCredits: data.remainingCredits ?? null,
     planCredits: data.planCredits ?? null,
   }

@@ -7,7 +7,7 @@ Guidance for AI coding agents (and humans) working in this repository.
 1. **Local-first.** No accounts, no telemetry, no hosted backend. Apart from an update check against GitHub's public API (`lib/updates.ts`, switchable off), the only network calls go to services the user configured: model providers, Firecrawl, Telegram (and a Cloudflare quick tunnel for phone take-over links). Agents' machines run in Docker on the user's computer.
 2. **Agents never act on the host.** Every agent tool that executes something does so in the agent's Docker workstation (`lib/workstation.ts`). Never mount host paths into it.
 3. **Secrets stay on the server.** Never return a raw key from a server action or render one in a component; use `describeSetting()` which masks them.
-4. **Loopback only.** Don't weaken `proxy.ts`.
+4. **Loopback only, and only the person's browser.** Don't weaken `proxy.ts` or the browser key (`lib/browser-key.ts`): agents' machines can reach loopback through Docker.
 
 ## Installing Xiryn for someone
 
@@ -16,7 +16,7 @@ If you were asked to set Xiryn up rather than change it:
 1. Run `XIRYN_YES=1 XIRYN_NO_START=1 ./setup.sh` (macOS, Linux) or `$env:XIRYN_YES="1"; $env:XIRYN_NO_START="1"; .\setup.ps1` (Windows). It installs Git, Node.js and Docker when missing, the packages, and the workstation image.
 2. Exit code 2 means a step needs the person: show them the printed command (it needs their password) or ask them to finish the installer that opened, then run the setup again. If Docker Desktop isn't running, ask them to open it and accept its terms.
 3. Ask for at least one model provider key (and optionally `FIRECRAWL_API_KEY`, `TELEGRAM_BOT_TOKEN`) and write them into `.env`. Never echo or commit them.
-4. Start it with `npm run dev`, wait for http://127.0.0.1:6796, and open it.
+4. Start it with `npm run dev` and wait for http://127.0.0.1:6796 to answer. The first start opens Xiryn in their browser; otherwise run `npm run open`. The bare address only shows a "locked" page: Xiryn answers only a browser opened with its link.
 
 ## Stack
 
@@ -28,7 +28,7 @@ If you were asked to set Xiryn up rather than change it:
 ## Commands
 
 ```bash
-npm run dev          # :6796
+npm run dev          # :6796; the first start opens it, `npm run open` any time
 npm run check        # typecheck + lint + format check — run before finishing
 npm run build
 npm run db:generate  # after editing db/schema.ts; commit the migration

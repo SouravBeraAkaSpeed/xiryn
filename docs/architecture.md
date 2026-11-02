@@ -49,6 +49,10 @@ Defined in `lib/agent/tools.ts`. Every tool resolves "the agent holding the turn
 | Squad | `delegate` | Runtime (swaps agent, instructions and model) |
 | Hand-off | `request_takeover` | Runtime (ends the turn) + Telegram notice |
 
+Web results reach the model inside `<untrusted source="…">` markers (`untrusted()` in `lib/agent/tools.ts`). A closing marker inside the content is defused, and a stub cut short by compaction is closed again; the instructions say that text inside them is data, not orders.
+
+A model that can't see images can't use a screen. `lib/providers/capabilities.ts` asks Ollama (`/api/show`) and LM Studio (`/api/v0/models`) which models take images, and remembers it when a provider refuses images in a turn. An agent on such a model isn't offered the desktop and vault tools (`activeTools`, per step, so a squad hand-off to another model gets its own set), and its instructions say it works through the shell. The model picker says so before the model is chosen.
+
 Screenshots are returned to the model as images. OpenAI, Anthropic, Gemini, xAI, DeepSeek and Ollama take images inside tool results; for other providers (OpenAI-style APIs such as OpenRouter, LM Studio, Groq, Mistral or a custom endpoint, which would turn them into base64 text) the tool result keeps only its caption and the image follows in a message of its own, after a one-line assistant turn because Mistral and many chat templates refuse a user turn right after a tool turn. Before every step, `prepareStep` compacts the turn's context: only the two most recent screenshots and the six most recent tool outputs are kept in full, older ones are cut to short stubs. A long desktop session therefore costs roughly the same per step at step 40 as at step 4.
 
 ## Take-over and hand-offs
@@ -83,7 +87,7 @@ A routine (`routines` table) is a prompt, an owner (an agent or a squad) and a s
 
 ## Local models
 
-`lib/ollama.ts` talks only to the Ollama endpoint configured for Xiryn (`/api/version`, `/api/tags`, `/api/pull`). Settings → Local models starts a pull, which streams progress as lines of JSON into an in-memory map the panel polls. Downloading or choosing a model points Xiryn at Ollama if nothing else does; `npm run setup:local` does the same from the terminal, installing Ollama first if needed. Turns on Ollama models go through its native `/api/chat` (`ai-sdk-ollama`), with `num_ctx` (32K, 16K under 12 GB of memory) and `keep_alive` on every request: Ollama's default context is often 4K, which would cut an agent's prompt. Reasoning from earlier steps is left out of what's sent back (Ollama would fold it into the reply text), and a call that has to answer rather than act is offered no tools, since Ollama's API has no tool choice.
+`lib/ollama.ts` talks only to the Ollama endpoint configured for Xiryn (`/api/version`, `/api/tags`, `/api/pull`), and `lib/providers/capabilities.ts` only asks it `/api/show`. Settings → Local models starts a pull, which streams progress as lines of JSON into an in-memory map the panel polls. Downloading or choosing a model points Xiryn at Ollama if nothing else does; `npm run setup:local` does the same from the terminal, installing Ollama first if needed. Turns on Ollama models go through its native `/api/chat` (`ai-sdk-ollama`), with `num_ctx` (32K, 16K under 12 GB of memory) and `keep_alive` on every request: Ollama's default context is often 4K, which would cut an agent's prompt. Reasoning from earlier steps is left out of what's sent back (Ollama would fold it into the reply text), and a call that has to answer rather than act is offered no tools, since Ollama's API has no tool choice.
 
 ## Squads and delegation
 
@@ -95,8 +99,10 @@ Each agent's workstation is a Docker container named `xiryn-ws-<agent id>`, run 
 
 - **Image.** Its tag is a fingerprint of the `workstation/` folder (`lib/workstation-image.ts`). `npm run setup` builds it, or Xiryn does at boot or on first use. When an update changes the folder, the new image is built once and each agent moves to it the next time its machine starts.
 - **Lifecycle.** The first tool call that needs a machine creates it (starting Docker Desktop if it isn't running), with the agent's home folder in a named volume, `xiryn-home-<agent id>`, so files survive restarts and image updates. Inside the container a watchdog stops it after `XIRYN_WORKSTATION_AUTO_STOP_MINUTES` without activity (a running command or someone watching counts), even if Xiryn itself is closed. A janitor in the server removes machines of deleted agents and, with `XIRYN_WORKSTATION_AUTO_DELETE_MINUTES`, machines stopped for longer than that. Resetting or deleting an agent removes its container and volume.
+- **Size.** Each agent's processors, memory and screen come from `agent_machines` (`lib/machines.ts`), or the workspace defaults. The size is written on the container as a label, so a machine made with another size is rebuilt at its next start, keeping its home folder. Saving a size checks it against this computer and the container engine's own limit; on Windows, Xiryn can raise the WSL limit in `%UserProfile%\.wslconfig` at the person's request, keeping a backup (`lib/wsl.ts`).
+- **Network.** Machines join the `xiryn-workstations` bridge network with container-to-container traffic off (`enable_icc=false`) and run with `--cap-drop NET_RAW`: they reach the internet, not each other.
 - **Commands.** `shell` runs `xiryn-run`, which writes output to a file, so a program left running in the background can't hold the call open, and returns the beginning and end of very long output.
-- **Live desktop.** noVNC listens on port 6080 inside the container, published on `127.0.0.1` with a random host port. The browser connects there directly with the container's random VNC password, which only the server hands out. For phone take-overs, `xiryn-tunnel` starts a Cloudflare quick tunnel inside the container that closes itself after 30 minutes.
+- **Live desktop.** noVNC listens on port 6080 inside the container, published on `127.0.0.1` with a random host port. The browser connects there directly, under the other loopback name than the page's (so Xiryn's cookie never reaches the container), with the container's random VNC password, which only the server hands out. For phone take-overs, `xiryn-tunnel` starts a Cloudflare quick tunnel inside the container that closes itself after 30 minutes, or when the person hands the desktop back.
 
 ## Data
 
@@ -111,6 +117,7 @@ Everything lives in `data/xiryn.db` (override with `XIRYN_DATA_DIR`). Schema: `d
 | `turns` | The usage ledger, with each turn's cost in millionths of a dollar |
 | `routines` | Scheduled tasks: prompt, owner, schedule, next and last run |
 | `routine_runs` | Each time a routine came due or was run by hand: outcome, reason, timing and its turn |
+| `agent_machines` | An agent's own processors, memory and screen size, when it has them |
 | `settings` | Values saved from Settings (override `.env`) |
 
 ## Settings resolution
@@ -123,4 +130,11 @@ Everything lives in `data/xiryn.db` (override with `XIRYN_DATA_DIR`). Schema: `d
 
 ## Security boundary
 
-`proxy.ts` runs before every request and refuses any `Host` or `Origin` that isn't loopback (or in `XIRYN_ALLOWED_HOSTS`). Together with binding to `127.0.0.1`, this keeps an account-less app private and blocks DNS rebinding. See [SECURITY.md](../SECURITY.md).
+`proxy.ts` runs before every request and refuses any `Host` or `Origin` that isn't loopback (or in `XIRYN_ALLOWED_HOSTS`). Together with binding to `127.0.0.1`, this keeps an account-less app private and blocks DNS rebinding.
+
+Loopback alone isn't enough, though: containers reach it through Docker. So `proxy.ts` also asks for the browser key (`lib/browser-key.ts`):
+- A random key lives in `data/browser.key`. `/unlock?key=…` trades it for an `HttpOnly`, `SameSite=Strict` cookie made from it, then redirects to `/`. Everything else without that cookie gets a 401: an explanatory page for a browser, plain text otherwise.
+- `instrumentation.ts` prints the link at every start, and the first start, which makes the key, opens it in the default browser (`lib/open-browser.ts`, off with `XIRYN_NO_BROWSER`).
+- `npm run open` (`scripts/open.mjs`) opens it again any time.
+
+See [SECURITY.md](../SECURITY.md).

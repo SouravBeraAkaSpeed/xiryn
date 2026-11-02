@@ -1,5 +1,12 @@
 import { relations } from "drizzle-orm"
-import { index, integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core"
+import {
+  index,
+  integer,
+  primaryKey,
+  real,
+  sqliteTable,
+  text,
+} from "drizzle-orm/sqlite-core"
 import { createInsertSchema } from "drizzle-zod"
 import { nanoid } from "nanoid"
 import { z } from "zod"
@@ -256,6 +263,22 @@ export const vaultApprovals = sqliteTable(
 export const settings = sqliteTable("settings", {
   key: text().primaryKey(),
   value: text().notNull(),
+  updatedAt: timestamp(),
+})
+
+/* ──────────────────────────── machines ──────────────────────────── */
+
+// How big each agent's computer is: processors, memory and screen. No row:
+// the workspace defaults from Settings. A change applies the next time the
+// machine starts; its home folder is kept.
+export const agentMachines = sqliteTable("agent_machines", {
+  agentId: text()
+    .primaryKey()
+    .references(() => agents.id, { onDelete: "cascade" }),
+  cpus: real().notNull(),
+  memoryGb: real().notNull(),
+  screenWidth: integer().notNull(),
+  screenHeight: integer().notNull(),
   updatedAt: timestamp(),
 })
 

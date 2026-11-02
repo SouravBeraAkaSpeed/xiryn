@@ -74,6 +74,8 @@ $env:XIRYN_LOCAL="1"; irm https://raw.githubusercontent.com/SouravBeraAkaSpeed/x
 
 **🧠 Any model, your keys.** OpenAI, Anthropic, Google, xAI, Groq, Mistral, DeepSeek, OpenRouter, Ollama, LM Studio, or any OpenAI-compatible endpoint. Pick a model per agent. No subscription — you pay providers directly for what you use.
 
+**📐 Machines your size.** Give each agent as many processors, as much memory and as big a screen as you like, up to everything your computer has. On Windows, Xiryn offers to raise Docker's own limit for you.
+
 **🗑️ Disposable machines.** Reset an agent and its container is destroyed. Delete it and it's gone. Turn on auto-delete and workstations vanish after every session — while the agent's memory stays safe on your disk.
 
 **👥 Agents that work as a team.** Put several agents in a squad. Ask any of them; they delegate to whoever fits the job — each on its own model and its own machine.
@@ -199,7 +201,7 @@ The setup asks once, then does the rest:
 1. Installs what's missing — **Git**, **Node.js**, and **Docker** (Docker Desktop through `winget` on Windows or Homebrew on macOS; Docker Engine through `get.docker.com` on Linux).
 2. Clones Xiryn into `./xiryn` and installs its packages.
 3. Starts Docker and builds the agents' desktop image — a few minutes, once.
-4. Creates `.env` and starts Xiryn at **<http://127.0.0.1:6796>**.
+4. Creates `.env` and starts Xiryn, which opens itself in your browser.
 
 > The first time, Docker Desktop may ask you to accept its terms, and on Windows it can ask for a restart to turn on WSL 2. Afterwards run the setup again; it skips everything that's already done.
 
@@ -224,7 +226,7 @@ Install and start Xiryn for me — the open-source personal agent that runs on m
    - Optional: TELEGRAM_BOT_TOKEN to talk to my agents from my phone. Tell me how to get it: in Telegram, message @BotFather, send /newbot, choose a name and a username ending in "bot", and copy the token it replies with.
    Put what I give you into the matching lines of xiryn/.env. Never repeat the keys back to me, log them or commit .env.
 
-3. Start Xiryn with `npm run dev` inside the xiryn folder, in the background. Wait until http://127.0.0.1:6796 responds, then open it in my browser.
+3. Start Xiryn with `npm run dev` inside the xiryn folder, in the background, and wait until http://127.0.0.1:6796 responds. The first start opens Xiryn in my browser by itself; if it didn't, run `npm run open` in the xiryn folder, which opens Xiryn's private link (the bare address only shows a "locked" page).
 
 4. Finish with a short summary: what got installed, which keys are set, how to start Xiryn next time (cd xiryn && npm run dev), and — if I added a Telegram token — that I should open Settings → Remote access in Xiryn and scan the QR code with my phone to pair it.
 ```
@@ -273,7 +275,7 @@ cd xiryn
 npm run dev                    # or: npm run build && npm start
 ```
 
-Open **<http://127.0.0.1:6796>** and deploy your first agent. Prefer containers all the way down? `docker compose up -d` runs Xiryn itself in Docker too.
+The first start opens Xiryn in your browser; deploy your first agent. Later, open the link Xiryn prints when it starts, or run **`npm run open`**. Xiryn only answers a browser that was given that link, so your agents' machines and other programs on your computer can't use it as you ([why](#security--privacy)). Your browser remembers it. Prefer containers all the way down? `docker compose up -d` runs Xiryn itself in Docker too.
 
 Click **alerts** in the status bar once to allow desktop notifications: you'll hear a chime and get a notification whenever an agent finishes, fails or needs you — even with Xiryn in the background.
 
@@ -401,14 +403,15 @@ Every setting can come from `.env` **or** from **Settings** in the app. Values s
 | `OLLAMA_BASE_URL`, `LMSTUDIO_BASE_URL`, `CUSTOM_BASE_URL` | Local runtimes and any OpenAI-compatible API |
 | `XIRYN_DEFAULT_MODEL`, `XIRYN_MAX_STEPS` | Default `provider/model`, max tool calls per turn |
 | `XIRYN_MONTHLY_BUDGET` | Dollars a month for paid models; once spent they wait for the 1st (local models keep working) |
-| `XIRYN_WORKSTATION_CPUS`, `XIRYN_WORKSTATION_MEMORY_GB` | Limits for each agent's machine (default 2 CPUs, 4 GB) |
+| `XIRYN_WORKSTATION_CPUS`, `XIRYN_WORKSTATION_MEMORY_GB` | Default size of an agent's machine (2 CPUs, 4 GB). Each agent can get its own, screen size included, under **Machine → Size** |
 | `XIRYN_WORKSTATION_AUTO_STOP_MINUTES`, `XIRYN_WORKSTATION_AUTO_DELETE_MINUTES` | Idle stop; disposable machines |
 | `XIRYN_PHONE_TAKEOVER` | `off` leaves the phone link out of Telegram hand-offs |
 | `FIRECRAWL_API_KEY` | Web search and reading |
 | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_OWNER_ID` | Remote access |
 | `XIRYN_TELEGRAM_NOTIFY` | Telegram notice when a task finishes: `long` (a minute or more, default), `all` or `off` |
 | `XIRYN_DATA_DIR`, `XIRYN_ALLOWED_HOSTS` | Data location; extra hostnames behind your own proxy |
-| `XIRYN_URL` | Where you open Xiryn, for links in Telegram hand-offs |
+| `XIRYN_URL` | Where you open Xiryn, for its link and for links in Telegram hand-offs |
+| `XIRYN_NO_BROWSER` | `1` stops the first start from opening a browser (servers) |
 | `XIRYN_UPDATE_CHECK` | `off` stops the update check and star count |
 | `XIRYN_DESKTOP_NOTIFY` | `off` stops operating-system notifications when no Xiryn tab is open |
 
@@ -417,6 +420,8 @@ Every setting can come from `.env` **or** from **Settings** in the app. Values s
 Xiryn has no user accounts, so it's built never to be reachable by anyone but you:
 
 - Binds to **127.0.0.1** only, and refuses any request whose `Host` or `Origin` isn't loopback — which also blocks DNS-rebinding attacks from web pages you visit.
+- Answers only a browser that was opened with its private link. Loopback isn't only you: an agent's machine can reach it through Docker. The link carries a key from your data folder, which no agent's machine can read, and your browser keeps a cookie made from it. `npm run open` opens the link any time.
+- Agents' machines can't reach each other, and can't craft raw network packets.
 - API keys never reach the browser; the UI only sees masked values, and keys are kept out of logs.
 - Telegram answers exactly **one** paired account; pairing codes are single-use and rotate after wrong guesses.
 - Agents execute only inside their own containers — never on your desktop or in your files. Their browsers have password saving and card autofill switched off.
@@ -429,7 +434,7 @@ See [SECURITY.md](SECURITY.md) for the full model and how to report a vulnerabil
 ## FAQ
 
 **Does an agent control my computer?**
-No. Everything an agent does — commands, files, mouse, keyboard, browser — happens inside its own Docker container: a separate Linux system with its own desktop and files. It can't see your screen, files or apps, so you keep using your computer normally. It does share your CPU and memory while it works; the limits are in Settings.
+No. Everything an agent does — commands, files, mouse, keyboard, browser — happens inside its own Docker container: a separate Linux system with its own desktop and files. It can't see your screen, files or apps, so you keep using your computer normally. It does share your CPU and memory while it works: set each agent's processors, memory and screen size under **Machine → Size** in its workbench, as much as your computer has.
 
 **Can it book a flight or order something?**
 It can do the legwork on real websites — search, compare, fill in the details — and it will ask before anything irreversible. Payments always need your approval: the agent shows you the merchant, the amount and the site, and you either let it pay with a card or UPI ID from your vault, or take over its screen and pay yourself — in the app or from your phone through Telegram. Logins work the same way: a saved login is filled for it, or you sign in on its screen once and the session stays.

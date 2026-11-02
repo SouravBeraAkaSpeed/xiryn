@@ -17,7 +17,7 @@ import {
 
 import { fetchProviderModels, saveSettings, testIntegration } from "@/actions/settings"
 import { buildWorkstationImage, dockerStatus, startDocker } from "@/actions/workstation"
-import { ModelPicker } from "@/components/model-picker"
+import { ModelPicker, ModelSightNote } from "@/components/model-picker"
 import { Button } from "@/components/ui/button"
 import { LocalModelsCard } from "@/components/settings/local-models"
 import { VaultPanel } from "@/components/settings/vault-panel"
@@ -380,7 +380,9 @@ function IntegrationCard({
   const [testing, setTesting] = React.useState(false)
   const [result, setResult] = React.useState<TestResult>(null)
   const keyField = fields.find((field) => field.secret)!
-  const connected = keyField.setting.set
+  // A Firecrawl server of your own may run without a key
+  const { status } = useWorkspace()
+  const connected = keyField.setting.set || status.web
 
   return (
     <div className="flex flex-col gap-4 rounded-xl border bg-surface/50 p-4">
@@ -831,6 +833,14 @@ function ModelSection({ data }: { data: SettingsData }) {
                 : data.resolvedDefaultModel
             }
           />
+          <ModelSightNote
+            spec={
+              model ||
+              (data.defaultModel.source === "env"
+                ? data.defaultModel.value
+                : data.resolvedDefaultModel)
+            }
+          />
           <span className="text-[11.5px] text-muted-foreground">
             Used by every agent that doesn&apos;t pick its own.
             {data.defaultModel.source === "env" &&
@@ -1013,7 +1023,7 @@ export function SettingsForm({
             name="Firecrawl"
             kind="firecrawl"
             href="https://www.firecrawl.dev/app/api-keys"
-            description="Web search and clean page extraction for every agent."
+            description="Web search and clean page extraction for every agent. For a Firecrawl server of your own, set its API URL; the key is then optional."
             fields={[
               {
                 key: "firecrawl.apiKey",

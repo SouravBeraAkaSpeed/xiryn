@@ -5,10 +5,11 @@ import {
   CheckIcon,
   ChevronsUpDownIcon,
   CornerDownLeftIcon,
+  EyeOffIcon,
   RefreshCwIcon,
 } from "lucide-react"
 
-import { fetchProviderModels } from "@/actions/settings"
+import { checkModelSight, fetchProviderModels } from "@/actions/settings"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Spinner } from "@/components/ui/spinner"
 import {
@@ -71,6 +72,35 @@ export function ModelSpecLabel({
         <span className="truncate">{spec}</span>
       )}
     </span>
+  )
+}
+
+// Said when the model is picked, not after an agent has spent a turn on it:
+// a model that can't see images can't use the desktop
+export function ModelSightNote({ spec }: { spec: string | null | undefined }) {
+  const [checked, setChecked] = React.useState<{ spec: string; sees: boolean | null }>()
+  React.useEffect(() => {
+    if (!spec) return
+    let current = true
+    checkModelSight(spec)
+      .then((sees) => {
+        if (current) setChecked({ spec, sees })
+      })
+      .catch(() => {})
+    return () => {
+      current = false
+    }
+  }, [spec])
+  if (!spec || checked?.spec !== spec || checked.sees !== false) return null
+  return (
+    <p className="flex items-start gap-1.5 text-[12px] leading-relaxed text-warn">
+      <EyeOffIcon className="mt-0.5 size-3.5 shrink-0" />
+      <span>
+        <span className="font-mono">{parseModelSpec(spec)?.model ?? spec}</span>{" "}
+        can&apos;t see images, so an agent on it can&apos;t use its desktop: it works
+        through the shell and files only. For desktop tasks, pick a model with vision.
+      </span>
+    </p>
   )
 }
 

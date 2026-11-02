@@ -18,7 +18,8 @@ git clone https://github.com/SouravBeraAkaSpeed/xiryn.git
 cd xiryn
 npm install
 npm run setup        # creates .env from .env.example
-npm run dev          # http://127.0.0.1:6796
+npm run dev          # http://127.0.0.1:6796, opened for you the first time
+npm run open         # opens Xiryn's link in your browser any time
 ```
 
 You don't need Docker or a Firecrawl key to work on most of the UI; the app tells you which capabilities are off. To work on workstations, the image is built from `workstation/` (`npm run workstation:build` rebuilds it after you change it).
