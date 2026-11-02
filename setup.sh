@@ -264,16 +264,17 @@ no_start="${XIRYN_NO_START:-0}"
 for arg in "$@"; do [ "$arg" = --no-start ] && no_start=1; done
 if [ "$no_start" = 0 ] && ask "Start Xiryn now?"; then
   url="http://127.0.0.1:6796"
+  # Once it answers, open its link: Xiryn only answers a browser opened with it
   ( for _ in $(seq 120); do
-      if curl -fs -o /dev/null "$url"; then
-        if [ "$platform" = mac ]; then open "$url"; elif has xdg-open; then xdg-open "$url" >/dev/null 2>&1; fi
+      if curl -s -o /dev/null "$url"; then
+        node scripts/open.mjs >/dev/null 2>&1
         exit 0
       fi
       sleep 1
     done ) &
-  printf '  Xiryn is starting at %s%s%s — press Ctrl+C to stop it.\n' "$bold" "$url" "$reset"
-  printf '  Next time, start it with: %scd %s && npm run dev%s\n\n' "$bold" "$(pwd)" "$reset"
-  run_with_docker "npm run dev"
+  printf '  Xiryn is starting and opens in your browser — press Ctrl+C to stop it.\n'
+  printf '  Next time, start it with: %scd %s && npm run dev%s, then %snpm run open%s\n\n' "$bold" "$(pwd)" "$reset" "$bold" "$reset"
+  run_with_docker "XIRYN_NO_BROWSER=1 npm run dev"
 else
   printf '  Start Xiryn any time with: %scd %s && npm run dev%s\n\n' "$bold" "$(pwd)" "$reset"
 fi

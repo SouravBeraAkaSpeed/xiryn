@@ -120,16 +120,26 @@ if ($LASTEXITCODE -ne 0 -and $dockerFresh) {
 Write-Host ""
 if (-not $NoStart -and (Ask "Start Xiryn now?")) {
   $url = "http://127.0.0.1:6796"
+  # Once it answers (a 401 counts), open its link: Xiryn only answers a
+  # browser opened with it
   Start-Job -ScriptBlock {
-    param($url)
+    param($url, $dir)
     for ($i = 0; $i -lt 120; $i++) {
-      try { Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 2 | Out-Null; Start-Process $url; return } catch { Start-Sleep 1 }
+      try {
+        Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 2 | Out-Null
+      } catch {
+        if (-not $_.Exception.Response) { Start-Sleep 1; continue }
+      }
+      Set-Location $dir
+      node scripts/open.mjs | Out-Null
+      return
     }
-  } -ArgumentList $url | Out-Null
-  Write-Host "  Xiryn is starting at $url - press Ctrl+C to stop it."
-  Write-Host "  Next time, start it with: cd $((Get-Location).Path); npm run dev"
+  } -ArgumentList $url, (Get-Location).Path | Out-Null
+  Write-Host "  Xiryn is starting and opens in your browser - press Ctrl+C to stop it."
+  Write-Host "  Next time, start it with: cd $((Get-Location).Path); npm run dev, then npm run open"
   Write-Host ""
-  npm run dev
+  $env:XIRYN_NO_BROWSER = "1"
+  try { npm run dev } finally { Remove-Item Env:XIRYN_NO_BROWSER -ErrorAction SilentlyContinue }
 } else {
   Write-Host "  Start Xiryn any time with: cd $((Get-Location).Path); npm run dev"
   Write-Host ""
