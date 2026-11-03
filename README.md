@@ -289,6 +289,10 @@ npm run background -- stop      # stop it (status, restart and no-login work too
 
 It serves a production build on 127.0.0.1, built once and again after each update, and logs to `data/xiryn.log`. Agents, routines and Telegram keep working with every window closed; with no Xiryn tab open, your computer itself shows a notification when an agent finishes or needs you.
 
+## One-Click Deploy
+
+[![Deploy on RepoCloud](https://d16t0pc4846x52.cloudfront.net/deploylobe.svg)](https://repocloud.io/details/Xiryn/)
+
 ## Updating
 
 When something new is pushed, an **update** button appears next to the Xiryn logo; it brings you here.
